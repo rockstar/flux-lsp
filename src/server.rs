@@ -202,6 +202,30 @@ impl LanguageServer for LspServer {
         };
         Ok(Some(response))
     }
+    async fn completion(&self, params: lsp::CompletionParams) -> Result<Option<lsp::CompletionResponse>> {
+        let key =
+            params.text_document_position.text_document.uri;
+        let store = self.store.lock().unwrap();
+        if !store.contains_key(&key) {
+            // File isn't loaded into memory
+            error!(
+                "signature help failed: file {} not open on server",
+                key
+            );
+            return Err(lspower::jsonrpc::Error::invalid_params(
+                format!("file not opened: {}", key),
+            ));
+        }
+
+        // TODO: handle completion triggers
+
+        let _data = store.get(&key).unwrap();
+
+        let completion_items = vec![];
+        // TODO: maybe we want a CompletionList?
+        let response = lsp::CompletionResponse::Array(completion_items);
+        Ok(Some(response))
+    }
 }
 
 #[cfg(test)]
@@ -412,5 +436,93 @@ mod tests {
                 .collect::<Vec<lsp::SignatureInformation>>()
                 .len()
         );
+    }
+
+    // If the file hasn't been opened on the server, return an error.
+    #[test]
+    fn test_completion_not_opened() {
+        let server = create_server();
+
+        let params = lsp::CompletionParams {
+            text_document_position: lsp::TextDocumentPositionParams {
+                text_document: lsp::TextDocumentIdentifier {
+                    uri: lsp::Url::parse(
+                            "file:///home/user/file.flux",
+                        )
+                        .unwrap(),
+                },
+                position: lsp::Position {
+                    line: 9,
+                    character: 1,
+                },
+            },
+            work_done_progress_params: lsp::WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: lsp::PartialResultParams {
+                partial_result_token: None,
+            },
+            context: None,
+        };
+
+        let result = block_on(server.completion(params));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_completion_variable() {
+        let fluxscript = r#"import "strings"
+import "csv"
+
+cal = 10
+env = "prod01-us-west-2"
+
+cool = (a) => a + 1
+
+c
+
+errorCounts = from(bucket:"kube-infra/monthly")
+    |> range(start: -3d)
+    |> filter(fn: (r) => r._measurement == "query_log" and
+                         r.error != "" and
+                         r._field == "responseSize" and
+                         r.env == env)
+    |> group(columns:["env", "error"])
+    |> count()
+    |> group(columns:["env", "_stop", "_start"])
+
+errorCounts
+    |> filter(fn: (r) => strings.containsStr(v: r.error, substr: "AppendMappedRecordWithNulls"))"#;
+        let server = create_server();
+        open_file(&server, fluxscript.to_string());
+
+        let params = lsp::CompletionParams {
+            text_document_position: lsp::TextDocumentPositionParams {
+                text_document: lsp::TextDocumentIdentifier {
+                    uri: lsp::Url::parse(
+                            "file:///home/user/file.flux",
+                        )
+                        .unwrap(),
+                },
+                position: lsp::Position {
+                    line: 9,
+                    character: 1,
+                },
+            },
+            work_done_progress_params: lsp::WorkDoneProgressParams {
+                work_done_token: None,
+            },
+            partial_result_params: lsp::PartialResultParams {
+                partial_result_token: None,
+            },
+            context: None,
+        };
+
+        let result =
+            block_on(server.completion(params)).unwrap();
+
+        let expected_response = Some(lsp::CompletionResponse::Array(vec![]));
+        assert_eq!(expected_response, result);
     }
 }
