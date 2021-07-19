@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use log::{debug, error, info, warn};
@@ -61,6 +62,72 @@ fn replace_string_in_range(
     contents.replace_range(string_range.0..string_range.1, &new);
     contents
 }
+
+fn find_references(
+    contents: String,
+    position: lsp::Position,
+) -> Vec<lsp::Location> {
+    let mut locations: Vec<lsp::Location> = vec![];
+    let pkg = parse_and_analyze(&contents);
+    let result = find_node(flux::semantic::walk::Node::Package(&pkg), position);
+
+    if let Some(node) = result.node {
+        let name = match node.as_ref() {
+            flux::semantic::walk::Node::Identifier(ident) => Some(ident.name.clone()),
+            flux::semantic::walk::Node::IdentifierExpr(ident) => Some(ident.name.clone()),
+            _ => None,
+        };
+
+        if let Some(name) = name {
+            let scope: Option<Rc<flux::semantic::walk::Node>> = {
+                let path_iter = result.path.iter().rev();
+                for n in path_iter {
+                    match n.as_ref() {
+                        flux::semantic::walk::Node::FunctionExpr(_)
+                        | flux::semantic::walk::Node::Package(_)
+                        | flux::semantic::walk::Node::File(_) => {
+                            if let flux::semantic::walk::Node::FunctionExpr(f) = n.as_ref() {
+                                if function_defines(name.clone(), f) {
+                                    return Some(n.clone());
+                                }
+                            }
+
+                            if is_scope(name.clone(), n.clone()) {
+                                return Some(n.clone());
+                            }
+                        }
+                        _ => None,
+                    }
+                }
+
+                if path.len() > 1 {
+                    return Some(path[0].clone());
+                }
+            };
+                find_scope(result.path.clone(), node.clone());
+
+            if let Some(scope) = scope {
+                let mut visitor = IdentFinderVisitor::new(name);
+                walk::walk(&mut visitor, scope);
+
+                let state = visitor.state.borrow();
+                let identifiers = (*state).identifiers.clone();
+
+                for node in identifiers {
+                    let loc = map_node_to_location(
+                        uri.clone(),
+                        node.clone(),
+                    );
+                    locations.push(loc);
+                }
+            }
+        }
+    }
+
+    Ok(locations)
+}
+
+
 
 #[allow(dead_code)]
 struct LspServerOptions {
@@ -330,6 +397,20 @@ impl LanguageServer for LspServer {
         );
 
         Ok(Some(vec![edit]))
+    }
+    async fn rename(&self, params: lsp::RenameParams) -> Result<Option<lsp::WorkspaceEdit>> {
+        let key = params.text_document_position.text_document.uri;
+        let store = self.store.lock().unwrap();
+        // TODO: handle not loaded
+        let contents = store.get(&key).unwrap();
+        let mut changes = HashMap::new();
+
+        let response = lsp::WorkspaceEdit {
+            changes: None,
+            document_changes: None,
+            change_annotations: None,
+        };
+        Ok(Some(response))
     }
 }
 
@@ -822,4 +903,84 @@ errorCounts
         );
         assert_eq!(vec![expected], result);
     }
+
+    #[test]
+    fn test_rename() {
+        let fluxscript = r#"import "strings"
+env = "prod01-us-west-2"
+
+errorCounts = from(bucket:"kube-infra/monthly")
+    |> range(start: -3d)
+    |> filter(fn: (r) => r._measurement == "query_log" and
+                         r.error != "" and
+                         r._field == "responseSize" and
+                         r.env == env)
+    |> group(columns:["env", "error"])
+    |> count()
+    |> group(columns:["env", "_stop", "_start"])
+
+errorCounts
+    |> filter(fn: (r) => strings.containsStr(v: r.error, substr: "AppendMappedRecordWithNulls"))"#;
+        let server = create_server();
+        open_file(&server, fluxscript.to_string());
+
+        let params = lsp::RenameParams {
+            text_document_position: lsp::TextDocumentPositionParams {
+                text_document: lsp::TextDocumentIdentifier {
+                    uri: lsp::Url::parse("file:///home/user/file.flux")
+                        .unwrap(),
+                },
+                position: lsp::Position {
+                    line: 1,
+                    character: 1,
+                },
+            },
+            new_name: "environment".to_string(),
+            work_done_progress_params: lsp::WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        };
+
+        let result = block_on(server.rename(params)).unwrap().unwrap();
+
+        let edits = vec![
+            lsp::TextEdit {
+                new_text: "environment".to_string(),
+                range: lsp::Range {
+                    start: lsp::Position {
+                        line: 1,
+                        character: 0,
+                    },
+                    end: lsp::Position {
+                        line: 1,
+                        character: 3,
+                    },
+                },
+            },
+            lsp::TextEdit {
+                new_text: "environment".to_string(),
+                range: lsp::Range {
+                    start: lsp::Position {
+                        line: 8,
+                        character: 34,
+                    },
+                    end: lsp::Position {
+                        line: 8,
+                        character: 37,
+                    },
+                },
+            },
+        ];
+        let mut changes: HashMap<lsp::Url, Vec<lsp::TextEdit>> = HashMap::new();
+        changes.insert(lsp::Url::parse("file:///home/user/file.flux").unwrap(), edits);
+
+        let expected = lsp::WorkspaceEdit {
+            changes: Some(changes),
+            document_changes: None,
+            change_annotations: None,
+        };
+
+        assert_eq!(expected, result);
+    }
+
 }
