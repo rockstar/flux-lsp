@@ -5,8 +5,12 @@
 use flux::ast;
 use flux::ast::walk;
 
-fn make_from_function(bucket: String) -> ast::Statement {
-    ast::Statement::Expr(Box::new(ast::ExprStmt {
+fn make_from_function(
+    bucket: String,
+    start: Option<String>,
+    end: Option<String>,
+) -> ast::Statement {
+    let from = ast::Statement::Expr(Box::new(ast::ExprStmt {
         base: ast::BaseNode::default(),
         expression: ast::Expression::Call(Box::new(ast::CallExpr {
             base: ast::BaseNode::default(),
@@ -42,7 +46,86 @@ fn make_from_function(bucket: String) -> ast::Statement {
             lparen: vec![],
             rparen: vec![],
         })),
-    }))
+    }));
+
+    // XXX: rockstar (23 June 2022) - If we get this far, and `start` and `stop` aren't
+    // provided, we could potentially be creating a query that won't work in some contexts.
+    // Cloud, for instance, does not allow unbounded queries, and without this `range` call,
+    // we are creating an unbounded query. Maybe this should error?
+    if start.is_some() || end.is_some() {
+        /*
+        let pipe = ast::Statement::Expr(
+            Box::new(ast::ExprStmt {
+                base: ast::BaseNode::default(),
+                expression: ast::Expression::PipeExpr(Box::new(ast::PipeExpr {
+                    argument: from,
+                    base: ast::BaseNode::default(),
+                    call: ast::CallExpr {
+                        arguments: vec![ast::Expression::Object(Box::new(ast::ObjectExpr {
+                            base: ast::BaseNode::default(),
+                            properties: vec![
+                                ast::Property {
+                                    base: ast::BaseNode::default(),
+                                    key: ast::PropertyKey::Identifier(ast::Identifier {
+                                        base: ast::BaseNode::default(),
+                                        name: "start".into(),
+                                    }),
+                                    value: Some(ast::Expression::Function(Box::new(ast::FunctionExpr{
+                                        arrow: vec![],
+                                        base: ast::BaseNode::default(),
+                                        body: ast::FunctionBody::Expr(ast::Expression::Unary(Box::new(ast::UnaryExpr{
+                                            base: ast::BaseNode::default(),
+                                            argument: ast::Expression::Member(Box::new(ast::MemberExpr {
+                                                base: ast::BaseNode::default(),
+                                                lbrack: vec![],
+                                                rbrack: vec![],
+                                                object: ast::Expression::Identifier(ast::Identifier {
+                                                    base: ast::BaseNode::default(),
+                                                    name: "r".into(),
+                                                }),
+                                                property: ast::PropertyKey::Identifier(ast::Identifier {
+                                                    base: ast::BaseNode::default(),
+                                                    name,
+                                                }),
+                                            })),
+                                            operator: ast::Operator::ExistsOperator,
+                                        }))),
+                                        lparen: vec![],
+                                        rparen: vec![],
+                                        params: vec![ast::Property {
+                                            base: ast::BaseNode::default(),
+                                            key: ast::PropertyKey::Identifier(ast::Identifier {
+                                                base: ast::BaseNode::default(),
+                                                name: "r".into(),
+                                            }),
+                                            comma: vec![],
+                                            separator: vec![],
+                                            value: None,
+                                        }],
+                                    }))),
+                                    comma: vec![],
+                                    separator: vec![],
+                                }
+                            ],
+                            lbrace: vec![],
+                            rbrace: vec![],
+                            with: None,
+                        }))],
+                        base: ast::BaseNode::default(),
+                        callee: ast::Expression::Identifier(ast::Identifier {
+                            base: ast::BaseNode::default(),
+                            name: "filter".into(),
+                        }),
+                        lparen: vec![],
+                        rparen: vec![],
+                    }
+                }))
+            })
+        );
+        return pipe;
+        */
+    }
+    from
 }
 
 #[derive(Default)]
@@ -97,6 +180,8 @@ impl<'a> walk::Visitor<'a> for FromBucketVisitor {
 fn find_the_from(
     file: &mut ast::File,
     bucket: String,
+    start: Option<String>,
+    stop: Option<String>,
 ) -> ast::Statement {
     // XXX: rockstar (13 Jun 2022) - This still has an issue where the last call in the
     // pipe is a yield. Appending to that statement will change the result.
@@ -118,13 +203,13 @@ fn find_the_from(
                 }
 
                 file.body.push(last_statement);
-                make_from_function(bucket)
+                make_from_function(bucket, start, stop)
             } else {
                 file.body.push(last_statement);
-                make_from_function(bucket)
+                make_from_function(bucket, start, stop)
             }
         }
-        None => make_from_function(bucket),
+        None => make_from_function(bucket, start, stop),
     }
 }
 
@@ -186,11 +271,13 @@ pub(crate) fn inject_tag_filter(
     file: &ast::File,
     name: String,
     bucket: String,
+    start: Option<String>,
+    stop: Option<String>,
 ) -> Result<ast::File, ()> {
     let mut ast = file.clone();
 
     let call: ast::Expression = if let ast::Statement::Expr(expr) =
-        find_the_from(&mut ast, bucket)
+        find_the_from(&mut ast, bucket, start, stop)
     {
         expr.expression
     } else {
@@ -273,11 +360,13 @@ pub(crate) fn inject_field_filter(
     file: &ast::File,
     name: String,
     bucket: String,
+    start: Option<String>,
+    stop: Option<String>,
 ) -> Result<ast::File, ()> {
     let mut ast = file.clone();
 
     let call: ast::Expression = if let ast::Statement::Expr(expr) =
-        find_the_from(&mut ast, bucket)
+        find_the_from(&mut ast, bucket, start, stop)
     {
         expr.expression
     } else {
@@ -338,11 +427,13 @@ pub(crate) fn inject_tag_value_filter(
     name: String,
     value: String,
     bucket: String,
+    start: Option<String>,
+    stop: Option<String>,
 ) -> Result<ast::File, ()> {
     let mut ast = file.clone();
 
     let call: ast::Expression = if let ast::Statement::Expr(expr) =
-        find_the_from(&mut ast, bucket)
+        find_the_from(&mut ast, bucket, start, stop)
     {
         expr.expression
     } else {
@@ -401,11 +492,13 @@ pub(crate) fn inject_measurement_filter(
     file: &ast::File,
     name: String,
     bucket: String,
+    start: Option<String>,
+    stop: Option<String>,
 ) -> Result<ast::File, ()> {
     let mut ast = file.clone();
 
     let call: ast::Expression = if let ast::Statement::Expr(expr) =
-        find_the_from(&mut ast, bucket)
+        find_the_from(&mut ast, bucket, start, stop)
     {
         expr.expression
     } else {
@@ -475,7 +568,8 @@ a = 0"#;
         let mut ast =
             flux::parser::parse_string("".into(), &fluxscript);
 
-        let from = find_the_from(&mut ast, "my-bucket".into());
+        let from =
+            find_the_from(&mut ast, "my-bucket".into(), None, None);
 
         assert_eq!(
             from.base().location,
@@ -489,6 +583,41 @@ a = 0"#;
         assert_eq!(2, ast.body.len());
     }
 
+    // When the query is empty, return a new `from` call, with a range when
+    // it is provided.
+    #[test]
+    fn test_find_the_from_empty_query_with_range() {
+        let fluxscript = r#""#;
+        let mut ast =
+            flux::parser::parse_string("".into(), &fluxscript);
+
+        let from = find_the_from(
+            &mut ast,
+            "my-bucket".into(),
+            Some("-12h".into()),
+            Some("now()".into()),
+        );
+
+        assert_eq!(
+            from.base().location,
+            ast::SourceLocation {
+                start: ast::Position { line: 0, column: 0 },
+                end: ast::Position { line: 0, column: 0 },
+                file: None,
+                source: None
+            }
+        );
+        assert_eq!(0, ast.body.len());
+
+        ast.body.push(from);
+        let expected = r#"from(bucket: "my-bucket")
+  |> range(start: -12h, stop: now())"#;
+        assert_eq!(
+            expected,
+            flux::formatter::convert_to_string(&ast).unwrap()
+        );
+    }
+
     // When the query is empty, return a new `from` call.
     #[test]
     fn test_find_the_from_empty_query() {
@@ -496,7 +625,8 @@ a = 0"#;
         let mut ast =
             flux::parser::parse_string("".into(), &fluxscript);
 
-        let from = find_the_from(&mut ast, "my-bucket".into());
+        let from =
+            find_the_from(&mut ast, "my-bucket".into(), None, None);
 
         assert_eq!(
             from.base().location,
@@ -517,7 +647,12 @@ a = 0"#;
         let mut ast =
             flux::parser::parse_string("".into(), &fluxscript);
 
-        let from = find_the_from(&mut ast, "my-new-bucket".into());
+        let from = find_the_from(
+            &mut ast,
+            "my-new-bucket".into(),
+            None,
+            None,
+        );
 
         assert_eq!(
             from.base().location,
@@ -538,7 +673,8 @@ a = 0"#;
         let mut ast =
             flux::parser::parse_string("".into(), &fluxscript);
 
-        let from = find_the_from(&mut ast, "my-bucket".into());
+        let from =
+            find_the_from(&mut ast, "my-bucket".into(), None, None);
 
         assert_eq!(
             from.base().location,
@@ -564,7 +700,8 @@ a = 0"#;
         let mut ast =
             flux::parser::parse_string("".into(), &fluxscript);
 
-        let from = find_the_from(&mut ast, "my-bucket".into());
+        let from =
+            find_the_from(&mut ast, "my-bucket".into(), None, None);
 
         assert_eq!(
             from.base().location,
@@ -590,9 +727,14 @@ a = 0"#;
         let fluxscript = r#"from(bucket: "my-bucket")"#;
         let ast = flux::parser::parse_string("".into(), &fluxscript);
 
-        let transformed =
-            inject_tag_filter(&ast, "cpu".into(), "my-bucket".into())
-                .unwrap();
+        let transformed = inject_tag_filter(
+            &ast,
+            "cpu".into(),
+            "my-bucket".into(),
+            None,
+            None,
+        )
+        .unwrap();
 
         let expected = r#"from(bucket: "my-bucket") |> filter(fn: (r) => exists r.cpu)"#;
         assert_eq!(
@@ -606,9 +748,14 @@ a = 0"#;
         let fluxscript = r#""#;
         let ast = flux::parser::parse_string("".into(), &fluxscript);
 
-        let transformed =
-            inject_tag_filter(&ast, "cpu".into(), "my-bucket".into())
-                .unwrap();
+        let transformed = inject_tag_filter(
+            &ast,
+            "cpu".into(),
+            "my-bucket".into(),
+            None,
+            None,
+        )
+        .unwrap();
 
         let expected = r#"from(bucket: "my-bucket") |> filter(fn: (r) => exists r.cpu)"#;
         assert_eq!(
@@ -627,6 +774,8 @@ a = 0"#;
             "myTag".into(),
             "myTagValue".into(),
             "my-bucket".into(),
+            None,
+            None,
         )
         .unwrap();
 
@@ -647,6 +796,8 @@ a = 0"#;
             "myTag".into(),
             "myTagValue".into(),
             "my-bucket".into(),
+            None,
+            None,
         )
         .unwrap();
 
@@ -666,6 +817,8 @@ a = 0"#;
             &ast,
             "myField".into(),
             "my-bucket".into(),
+            None,
+            None,
         )
         .unwrap();
 
@@ -685,6 +838,8 @@ a = 0"#;
             &ast,
             "myMeasurement".into(),
             "my-bucket".into(),
+            None,
+            None,
         )
         .unwrap();
 

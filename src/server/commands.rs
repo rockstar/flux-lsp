@@ -65,6 +65,13 @@ pub struct InjectTagFilterParams {
     pub text_document: lsp::TextDocumentIdentifier,
     pub bucket: String,
     pub name: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub stop: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -74,6 +81,13 @@ pub struct InjectTagValueFilterParams {
     pub bucket: String,
     pub name: String,
     pub value: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub stop: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -82,6 +96,13 @@ pub struct InjectFieldFilterParams {
     pub text_document: lsp::TextDocumentIdentifier,
     pub bucket: String,
     pub name: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub stop: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -90,4 +111,11 @@ pub struct InjectMeasurementFilterParams {
     pub text_document: lsp::TextDocumentIdentifier,
     pub bucket: String,
     pub name: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub stop: Option<String>,
 }

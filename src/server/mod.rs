@@ -1144,6 +1144,8 @@ impl LanguageServer for LspServer {
                     &file,
                     command_params.name,
                     command_params.bucket,
+                    command_params.start,
+                    command_params.stop,
                 ) {
                     Ok(value) => value,
                     Err(err) => {
@@ -1229,6 +1231,8 @@ impl LanguageServer for LspServer {
                         command_params.name,
                         command_params.value,
                         command_params.bucket,
+                        command_params.start,
+                        command_params.stop,
                     ) {
                         Ok(value) => value,
                         Err(err) => {
@@ -1311,6 +1315,8 @@ impl LanguageServer for LspServer {
                     &file,
                     command_params.name,
                     command_params.bucket,
+                    command_params.start,
+                    command_params.stop,
                 ) {
                     Ok(value) => value,
                     Err(err) => {
@@ -1395,6 +1401,8 @@ impl LanguageServer for LspServer {
                         &file,
                         command_params.name,
                         command_params.bucket,
+                        command_params.start,
+                        command_params.stop,
                     ) {
                         Ok(value) => value,
                         Err(err) => {
